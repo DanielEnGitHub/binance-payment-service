@@ -1,5 +1,5 @@
 app = "vega-binance-payment-service"
-primary_region = "ewr"
+primary_region = "fra"
 
 [deploy]
   strategy = "rolling"
