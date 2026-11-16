@@ -10,7 +10,7 @@ Actúa como intermediario entre el backend Django y la API personal de Binance (
 
 1. El backend Django recibe una orden con datos de pago Binance
 2. Django llama a este microservicio con el `transfer_id`, monto esperado, moneda y (opcionalmente) el username del remitente
-3. El microservicio consulta el historial de transacciones de la cuenta Binance en ventanas de 30 días (hasta 90 días atrás)
+3. El microservicio consulta el historial de transacciones de la cuenta Binance de los últimos 3 días
 4. Valida moneda, monto (tolerancia ±$0.10) y remitente
 5. Devuelve el resultado — Django confirma o rechaza la orden
 
@@ -20,6 +20,7 @@ Actúa como intermediario entre el backend Django y la API personal de Binance (
 |--------|------|------|-------------|
 | `GET` | `/health` | No | Health check |
 | `POST` | `/validate-transfer` | Bearer token | Valida una transferencia |
+| `GET` | `/transactions` | Bearer token | Lista las transferencias entrantes |
 
 ### POST `/validate-transfer`
 
@@ -61,9 +62,63 @@ Content-Type: application/json
 | Status | Descripción |
 |--------|-------------|
 | `403` | Token interno inválido |
-| `404` | Transferencia no encontrada en los últimos 90 días |
+| `404` | Transferencia no encontrada en los últimos 3 días |
 | `422` | Moneda, monto o remitente no coinciden |
 | `429` | Rate limit superado (20 req/min por IP) |
+| `502` | Error al comunicarse con la API de Binance |
+
+### GET `/transactions`
+
+Lista las transferencias **entrantes** (`amount > 0`) en USDT/USDC de la cuenta. Las salientes, reembolsos y otras monedas se descartan.
+
+**Headers**
+```
+Authorization: Bearer <INTERNAL_AUTH_TOKEN>
+```
+
+**Query params** (opcionales, en milisegundos)
+
+| Param | Default | Descripción |
+|-------|---------|-------------|
+| `start_time` | `end_time` − 3 días | Inicio de la ventana |
+| `end_time` | ahora | Fin de la ventana |
+
+La ventana no puede superar 90 días (límite de Binance).
+
+**Respuesta exitosa**
+```json
+{
+  "success": true,
+  "data": {
+    "start_time": 1719360000000,
+    "end_time": 1719619200000,
+    "truncated": false,
+    "transactions": [
+      {
+        "order_id": "M_P_71505278059528450",
+        "transaction_id": "M_P_71505104267788288",
+        "amount": "25.50000000",
+        "currency": "USDT",
+        "sender_username": "juanperez",
+        "transaction_time": 1719619200000,
+        "order_type": "C2C",
+        "raw": { ... }
+      }
+    ]
+  }
+}
+```
+
+> `amount` viaja como string para conservar los 8 decimales de Binance.  
+> `truncated: true` significa que Binance devolvió su máximo (100 registros, sin paginación): puede haber transacciones de la ventana que quedaron afuera. Consultar con una ventana más chica.
+
+**Errores posibles**
+
+| Status | Descripción |
+|--------|-------------|
+| `403` | Token interno inválido |
+| `422` | Ventana inválida (`start_time` ≥ `end_time` o mayor a 90 días) |
+| `429` | Rate limit superado |
 | `502` | Error al comunicarse con la API de Binance |
 
 ---
